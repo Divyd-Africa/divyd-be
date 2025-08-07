@@ -49,7 +49,7 @@ class User(AbstractBaseUser):
 
 class UserOTP(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
-    otp = models.CharField(verbose_name='OTP', max_length=255, null=True, blank=True)
+    otp = models.IntegerField(verbose_name='OTP', max_length=6, null=True, blank=True)
     otp_created_at = models.DateTimeField(verbose_name='OTP Created', auto_now_add=True)
 
 
