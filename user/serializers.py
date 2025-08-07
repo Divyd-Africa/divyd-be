@@ -5,3 +5,18 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['first_name', 'last_name', 'username', 'email', 'is_email_verified']
+
+
+class UserRegistrationSerializer(serializers.Serializer):
+    firstName = serializers.CharField()
+    lastName = serializers.CharField()
+    email = serializers.EmailField()
+    password = serializers.CharField()
+    pin = serializers.IntegerField()
+    username = serializers.CharField()
+    phoneNumber = serializers.CharField()
+
+    def validate_password(self, value):
+        if len(value) < 8:
+            raise serializers.ValidationError("Password must be at least 6 characters long.")
+        return value
