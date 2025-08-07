@@ -12,6 +12,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+import certifi
+os.environ['SSL_CERT_FILE'] = certifi.where()
 import datetime
 
 import dj_database_url
