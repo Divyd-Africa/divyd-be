@@ -24,7 +24,7 @@ class User(AbstractBaseUser):
     email = models.EmailField(verbose_name='Email', max_length=255, unique=True)
     phoneNumber = models.CharField(verbose_name='Phone Number', max_length=255)
     username = models.CharField(verbose_name='Username', max_length=255, unique=True)
-    pin = models.CharField(verbose_name='PIN', max_length=255, default='')
+    pin = models.CharField(verbose_name='PIN', default='')
     is_email_verified = models.BooleanField(verbose_name='Email Verified', default=False)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
@@ -33,7 +33,7 @@ class User(AbstractBaseUser):
 
     objects = CustomUserManager()
     USERNAME_FIELD = ('username')
-    REQUIRED_FIELDS = ['username', 'firstName', 'lastName']
+    REQUIRED_FIELDS = ['firstName', 'lastName']
 
     def __str__(self):
         return self.username
