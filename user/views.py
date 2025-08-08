@@ -3,14 +3,19 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from .models import *
-from rest_framework_simplejwt.tokens import AccessToken
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from rest_framework.views import APIView
 from .serializers import *
 from helpers import encryption_helper, otp
 from mailer import mailer
 
+def update_last_login(email):
+    user = User.objects.get(email=email)
+    user.last_login = timezone.now()
+    user.save()
 class UserRegistrationView(APIView):
     def post(self, request):
         body = request.data
@@ -101,6 +106,7 @@ class VerifyEmailView(APIView):
             else:
                 user.is_email_verified = True
                 user.save()
+
                 return Response({
                     'status': 'success',
                     'message': 'Email verified successfully'
@@ -129,11 +135,11 @@ class ResetPasswordView(APIView):
                     'message':message
                 }, status=status.HTTP_400_BAD_REQUEST)
             else:
-                token = AccessToken.for_user(user)
+                token = RefreshToken.for_user(user)
                 return Response({
                     'status': 'success',
                     'message':'OTP valid',
-                    'token': str(token),
+                    'token': str(token.access_token),
                 })
         except Exception as e:
             return Response({
@@ -182,5 +188,81 @@ class ResetPasswordView(APIView):
             return Response({
                 'message':str(e)
             }, status= status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+    def put(self, request):
+        user = request.user
+        body = request.data
+        if not body['old_password'] or not isinstance(body['old_password'], str):
+            return Response({
+                'message':'new_password is required'
+            }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if not body['new_password'] or not isinstance(body['new_password'], str):
+            return Response({
+                'message':'new_password is required'
+            }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if not body['confirm_password'] or not isinstance(body['confirm_password'], str):
+            return Response({
+                'message':'new_password is required'
+            }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if encryption_helper.verify_hash(body['old_password'],user.password):
+            if body['new_password'] == body['confirm_password']:
+                user.password = encryption_helper.hash(body['new_password'])
+                user.save()
+                return Response({
+                    'status': 'success',
+                    'message': 'Password updated successfully'
+                },status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    'message':'passwords do not match'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({
+                'message':'Old password is incorrect'
+            },status=status.HTTP_403_FORBIDDEN)
+
+class UserLoginView(APIView):
+    def post(self, request):
+        body = request.data
+        if not body['email'] or not isinstance(body['email'], str):
+            return Response({
+                'message':'Email is required'
+            }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if not body['pin'] or not isinstance(body['pin'], int):
+            return Response({
+                'message':'Password is required'
+            , }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        try:
+            user = User.objects.get(email=body['email'])
+            user_otp = UserOTP.objects.get(user=user)
+            if user_otp and user_otp.otp == None:
+                if encryption_helper.verify_hash(str(body['pin']),user.pin):
+                    token = RefreshToken.for_user(user)
+                    access_token = str(token.access_token)
+                    update_last_login(user.email)
+                    return Response({
+                        'status': 'success',
+                        'message':'Login Successful',
+                        'user':UserSerializer(user).data,
+                        'access_token':access_token,
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response({
+                        'message':'Incorrect Pin'
+                    }, status=status.HTTP_403_FORBIDDEN)
+            else:
+                return Response({
+                    'message':'Email is not verified'
+                }, status=status.HTTP_403_FORBIDDEN)
+        except User.DoesNotExist:
+            return Response({
+                'message':'Email is not registered on the app'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                'message':str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

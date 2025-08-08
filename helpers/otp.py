@@ -19,7 +19,8 @@ def verify_otp(user, otp):
         # Check if expired
         if otp_instance.otp_created_at + timedelta(minutes=5) < timezone.now():
             return False, "OTP has expired"
-
+        otp_instance.otp = None
+        otp_instance.save()
         return True, "OTP is valid"
 
     except UserOTP.DoesNotExist:
