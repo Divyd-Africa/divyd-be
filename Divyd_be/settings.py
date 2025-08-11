@@ -109,7 +109,7 @@ WSGI_APPLICATION = 'Divyd_be.wsgi.application'
 
 DATABASES = {
     'default':dj_database_url.config(
-        default=os.getenv('DB_URL'),
+        default=os.getenv('DB_URL2'),
         conn_max_age=600
     )
 }

@@ -12,7 +12,6 @@ class UserRegistrationSerializer(serializers.Serializer):
     lastName = serializers.CharField()
     email = serializers.EmailField()
     password = serializers.CharField()
-    pin = serializers.IntegerField()
     username = serializers.CharField()
     phoneNumber = serializers.CharField()
 
