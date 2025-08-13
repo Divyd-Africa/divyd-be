@@ -19,3 +19,8 @@ class UserRegistrationSerializer(serializers.Serializer):
         if len(value) < 8:
             raise serializers.ValidationError("Password must be at least 6 characters long.")
         return value
+
+class UserBankSerializer(serializers.Serializer):
+    class Meta:
+        model = UserBank
+        fields = '__all__'

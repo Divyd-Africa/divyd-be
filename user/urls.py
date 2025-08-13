@@ -10,4 +10,5 @@ urlpatterns = [
     path('password-login',UserPasswordLoginView.as_view(),name='password-login'),
     path('login',UserPinLoginView.as_view(),name='login'),
     path('set-pin',SetPinView.as_view(),name='set-pin'),
+    path('bank-account',BankAccountView.as_view(),name='bank-account'),
 ]

@@ -52,4 +52,15 @@ class UserOTP(models.Model):
     otp = models.IntegerField(verbose_name='OTP', null=True, blank=True)
     otp_created_at = models.DateTimeField(verbose_name='OTP Created', auto_now_add=True)
 
+    def __str__(self):
+        return self.user.username
 
+
+class UserBank(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    bank_code = models.CharField(verbose_name='Bank Code', max_length=10)
+    bank_name = models.CharField(verbose_name='Bank Name', max_length=255)
+    account_number = models.CharField(verbose_name='Account Number', max_length=11)
+
+    def __str__(self):
+        return self.user.username
