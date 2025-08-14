@@ -431,3 +431,12 @@ class BankAccountView(APIView):
                 'message':'Bank Account is invalid',
                 'response':valid_account['data']
             },status=status.HTTP_400_BAD_REQUEST)
+
+class TestView(APIView):
+    permission_classes = [IsAuthenticated]
+    def post(self, request):
+        user = request.user
+        response = kora_functions.generate_temp_account(5000,user)
+        return Response({
+            'response':response
+        })
