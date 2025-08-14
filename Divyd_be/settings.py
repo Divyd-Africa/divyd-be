@@ -48,7 +48,8 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'user',
-    'rest_framework'
+    'rest_framework',
+    'wallet'
 ]
 
 MIDDLEWARE = [
@@ -109,12 +110,17 @@ WSGI_APPLICATION = 'Divyd_be.wsgi.application'
 
 DATABASES = {
     'default':dj_database_url.config(
-        default=os.getenv('DB_URL'),
+        default=os.getenv('DB_URL2'),
         conn_max_age=600
     )
 }
 
-
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'mycache',
+    }
+}
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
@@ -164,3 +170,7 @@ EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 AUTH_USER_MODEL = 'user.User'
+
+KORA_SECRET = os.getenv('KORA_SECRET')
+KORA_PUBLIC = os.getenv('KORA_PUBLIC')
+KORA_ENCRYPTION = os.getenv('KORA_ENCRYPTION')

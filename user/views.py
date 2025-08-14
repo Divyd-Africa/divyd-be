@@ -1,5 +1,5 @@
 from django.core.validators import validate_email
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
@@ -9,9 +9,9 @@ from .models import *
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from rest_framework.views import APIView
 from .serializers import *
-from helpers import encryption_helper, otp
+from helpers import encryption_helper, otp, kora_functions
 from mailer import mailer
-
+from wallet.views import createWallet
 def update_last_login(email):
     user = User.objects.get(email=email)
     user.last_login = timezone.now()
@@ -26,10 +26,10 @@ class UserRegistrationView(APIView):
                 'errors': serializer.errors,
             }, status= status.HTTP_422_UNPROCESSABLE_ENTITY)
         hashed_password = encryption_helper.hash(serializer.data['password'])
-        hashed_pin = encryption_helper.hash(str(serializer.data['pin']))
         with transaction.atomic():
-            user = User.objects.create(firstName=serializer.data['firstName'], lastName=serializer.data['lastName'],email=serializer.data['email'],password=hashed_password,pin=hashed_pin,username=serializer.data['username'],phoneNumber=serializer.data['phoneNumber'])
+            user = User.objects.create(firstName=serializer.data['firstName'], lastName=serializer.data['lastName'],email=serializer.data['email'],password=hashed_password,username=serializer.data['username'],phoneNumber=serializer.data['phoneNumber'])
             user_otp = otp.generate_otp(user)
+            createWallet(user)
             mailer.send_otp_mail(serializer.data['firstName'], serializer.data['email'], user_otp)
             return Response({
                 'status': 'success',
@@ -223,7 +223,83 @@ class ChangePasswordView(APIView):
                 'message':'Old password is incorrect'
             },status=status.HTTP_403_FORBIDDEN)
 
-class UserLoginView(APIView):
+class SetPinView(APIView):
+    def put(self, request):
+        body = request.data
+        if not body['email'] or not isinstance(body['email'], str):
+            return Response({
+                'message':'email is required'
+            },status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if not body['pin'] or not isinstance(body['pin'], int):
+            return Response({
+                'message':'pin is required'
+            }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if not body['confirm_pin'] or not isinstance(body['confirm_pin'], int):
+            return Response({
+                'message':'confirm_pin is required'
+            }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        try:
+            validate_email(body['email'])
+            user = User.objects.get(email=body['email'])
+        except ValidationError or User.DoesNotExist:
+            return Response({
+                'message':'Invalid email'
+            },status=status.HTTP_400_BAD_REQUEST)
+        if body['pin'] == body['confirm_pin']:
+            user.pin = encryption_helper.hash(str(body['pin']))
+            user.save()
+            return Response({
+                'status': 'success',
+                'message': 'Pin set successfully'
+            },status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'message':'pins do not match'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+class UserPasswordLoginView(APIView):
+    def post(self, request):
+        body = request.data
+        if not body['email'] or not isinstance(body['email'], str):
+            return Response({
+                'message':'Email is required'
+            }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if not body['password'] or not isinstance(body['password'], str):
+            return Response({
+                'message':'Password is required'
+            , }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        try:
+            user = User.objects.get(email=body['email'])
+            user_otp = UserOTP.objects.get(user=user)
+            if user_otp and user_otp.otp == None:
+                if encryption_helper.verify_hash(str(body['password']),user.password):
+                    token = RefreshToken.for_user(user)
+                    access_token = str(token.access_token)
+                    update_last_login(user.email)
+                    return Response({
+                        'status': 'success',
+                        'message':'Login Successful',
+                        'user':UserSerializer(user).data,
+                        'access_token':access_token,
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response({
+                        'message':'Incorrect Password'
+                    }, status=status.HTTP_403_FORBIDDEN)
+            else:
+                return Response({
+                    'message':'Email is not verified'
+                }, status=status.HTTP_403_FORBIDDEN)
+        except User.DoesNotExist:
+            return Response({
+                'message':'Email is not registered on the app'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                'message':str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class UserPinLoginView(APIView):
     def post(self, request):
         body = request.data
         if not body['email'] or not isinstance(body['email'], str):
@@ -266,3 +342,92 @@ class UserLoginView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+class BankAccountView(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        banks = kora_functions.get_all_banks()
+        return Response({
+            'status': 'success',
+            'message': 'Banks found',
+            'banks': banks
+        })
+    def post(self, request):
+        body = request.data
+        user = request.user
+        if not body['account'] or not isinstance(body['account'], str):
+            return Response({
+                'message':'Account is required'
+            },status=status.HTTP_400_BAD_REQUEST)
+        if not body['bank'] or not isinstance(body['bank'], str):
+            return Response({
+                'message':'Bank Code is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if not body['bank_name'] or not isinstance(body['bank_name'], str):
+            return Response({
+                'message':'Bank Name is required'
+            },status=status.HTTP_400_BAD_REQUEST)
+        valid_account = kora_functions.verify_bank_details(body['bank'], body['account'])
+        if valid_account['status']:
+            try:
+                user = User.objects.get(email=user.email)
+            except User.DoesNotExist:
+                return Response({
+                    'message':'User not found'
+                },status=status.HTTP_404_NOT_FOUND)
+            try:
+                user_bank = UserBank.objects.create(user=user,bank_code=body['bank'],bank_name=body['bank_name'],account_number=body['account'])
+                return Response({
+                    'status': 'success',
+                    'message': 'Bank account saved',
+                    'details':valid_account['data']
+                },status=status.HTTP_201_CREATED)
+            except IntegrityError:
+                return Response({
+                    'message':'Bank account already set for user, update account details'
+                },status=status.HTTP_400_BAD_REQUEST)
+            except Exception as e:
+                return Response({
+                    'message':f'Bank account creation failed with {e}',
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        else:
+            return Response({
+                'message':'Bank Account is invalid'
+            },status=status.HTTP_400_BAD_REQUEST)
+
+    def put(self, request):
+        body = request.data
+        user = request.user
+        if not body['account'] or not isinstance(body['account'], str):
+            return Response({
+                'message':'Account is required'
+            },status=status.HTTP_400_BAD_REQUEST)
+        if not body['bank'] or not isinstance(body['bank'], str):
+            return Response({
+                'message':'Bank Code is required'
+            },status=status.HTTP_400_BAD_REQUEST)
+        if not body['bank_name'] or not isinstance(body['bank_name'], str):
+            return Response({
+                'message':'Bank Name is required'
+            },status=status.HTTP_400_BAD_REQUEST)
+        valid_account = kora_functions.verify_bank_details(body['bank'], body['account'])
+        if valid_account['status']:
+            try:
+                bank_det = UserBank.objects.get(user=user)
+            except UserBank.DoesNotExist:
+                return Response({
+                    'message':"You do not have any bank account saved"
+                },status=status.HTTP_404_NOT_FOUND)
+            bank_det.bank_code = body['bank']
+            bank_det.bank_name = body['bank_name']
+            bank_det.account_number = body['account']
+            bank_det.save()
+            return Response({
+                'status': 'success',
+                'message': 'Bank account saved',
+                'details':valid_account['data']
+            },status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'message':'Bank Account is invalid',
+                'response':valid_account['data']
+            },status=status.HTTP_400_BAD_REQUEST)
