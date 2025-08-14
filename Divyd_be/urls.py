@@ -20,6 +20,7 @@ from django.urls import path, include
 api_v1_patterns = [
     path('admin/', admin.site.urls),
     path('users/', include('user.urls')),
+    path('wallet/', include('wallet.urls')),
 
 ]
 

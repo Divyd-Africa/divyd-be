@@ -1,7 +1,7 @@
 from django.core.cache import cache
 from Divyd_be import settings
 import requests
-
+import uuid
 BASE_URL = 'https://api.korapay.com/merchant/api/v1'
 secret = settings.KORA_SECRET
 public = settings.KORA_PUBLIC
@@ -26,5 +26,45 @@ def verify_bank_details(bank_code, account_number):
     })
     return response.json()
 
+def create_virtual_account(user):
+    payload = {
+        'account_name':user.firstName + ' ' + user.lastName,
+        # 'account_reference':f'{user.username}-{user.id}',
+        'account_reference':"1234rfrfv",
+        'permanent':True,
+        'bank_code':"000",
+        'customer':{
+            "name":user.username,
+            "email":user.email,
+        },
+        'kyc':{
+            'bvn':'00000000000'
+        }
+    }
+    response = requests.post(f"{BASE_URL}/virtual-bank-account", json=payload, headers={
+        'Content-Type': 'application/json',
+        'Authorization':f"Bearer {secret}"
+    })
+    return response.json()
 
+def generate_temp_account(amount, user):
+    payload = {
+        "reference":uuid.uuid4().hex,
+        "amount":amount,
+        "currency":"NGN",
+        "customer":{
+            "email":user.email
+        },
+        "account_name":f"{user.firstName} {user.lastName}'s Divyd",
+        "merchant_bears_cost":False,
+        "metadata":{
+            "user_id":user.id,
+            "wallet_id":user.wallet.id
+        }
+    }
+    response = requests.post(f"{BASE_URL}/charges/bank-transfer", json=payload, headers={
+        'Content-Type': 'application/json',
+        'Authorization':f"Bearer {secret}"
+    })
+    return response.json()
 
