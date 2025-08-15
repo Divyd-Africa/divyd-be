@@ -1,7 +1,16 @@
+import hashlib
+import hmac
+import json
+
+from django.db import transaction
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from Divyd_be import settings
 from helpers import kora_functions
 from .models import *
 from .serializers import *
@@ -55,3 +64,50 @@ class FundWalletView(APIView):
             return Response({
                 "message":f"Something went wrong, {e} ",
             },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+#TODO: create the webhook for confirming transfer and updating user balance
+@csrf_exempt
+def webhook(request):
+    try:
+        print("Webhook hit")
+        kora_sig = request.headers.get('x-korapay-signature')
+        payload = request.body
+        event_data = json.loads(payload)
+        print(event_data)
+        payload_data = json.dumps(event_data['data'], separators=(',',':'))
+        print(payload_data)
+
+        computed_sig = hmac.new(
+            settings.KORA_SECRET.encode('utf-8'),
+            payload_data.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        if computed_sig != kora_sig:
+            return JsonResponse({
+                "message": "Invalid signature"
+            })
+        if event_data.get('event') == 'charge.success':
+            data = event_data.get("data",{})
+            reference = data.get('reference')
+            wallet_id = reference.split('-')[1]
+            og_reference = reference.split('-')[0]
+            try:
+                with transaction.atomic():
+                    wallet = Wallet.objects.get(id=wallet_id)
+                    actual_amount = data.get('amount') - data.get('fee')
+                    wallet.balance += actual_amount
+                    wallet.save()
+                    Transaction.objects.create(wallet=wallet, amount=actual_amount, reference=og_reference, transaction_type=Transaction.CREDIT,category=Transaction.FUNDING)
+                    return JsonResponse({
+                        "message":"Transaction saved successfully",
+                    })
+            except Exception as e:
+                print(str(e))
+                return JsonResponse({
+                    "message": f"Something went wrong, {e} ",
+                })
+    except Exception as err:
+        print(str(err))
+        return JsonResponse({"message": str(err)})
+
+
