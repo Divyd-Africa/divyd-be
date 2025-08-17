@@ -49,7 +49,7 @@ def create_virtual_account(user):
 
 def generate_temp_account(amount, user):
     payload = {
-        "reference":uuid.uuid4().hex,
+        "reference":f"{uuid.uuid4().hex}-{user.wallet.id}",
         "amount":amount,
         "currency":"NGN",
         "customer":{
@@ -60,11 +60,18 @@ def generate_temp_account(amount, user):
         "metadata":{
             "user_id":user.id,
             "wallet_id":user.wallet.id
-        }
+        },
+        "notification_url":"https://2b1c0f3f3840.ngrok-free.app/api/v1/wallet/webhook"
     }
     response = requests.post(f"{BASE_URL}/charges/bank-transfer", json=payload, headers={
         'Content-Type': 'application/json',
         'Authorization':f"Bearer {secret}"
     })
     return response.json()
+##TODO
+def transfer(amount, account, bank_code):
+    pass
+
+def encrypt_payload():
+    pass
 
