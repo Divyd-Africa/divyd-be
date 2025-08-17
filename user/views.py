@@ -25,16 +25,28 @@ class UserRegistrationView(APIView):
                 'message':'Invalid input',
                 'errors': serializer.errors,
             }, status= status.HTTP_422_UNPROCESSABLE_ENTITY)
-        hashed_password = encryption_helper.hash(serializer.data['password'])
-        with transaction.atomic():
-            user = User.objects.create(firstName=serializer.data['firstName'], lastName=serializer.data['lastName'],email=serializer.data['email'],password=hashed_password,username=serializer.data['username'],phoneNumber=serializer.data['phoneNumber'])
-            user_otp = otp.generate_otp(user)
-            createWallet(user)
-            mailer.send_otp_mail(serializer.data['firstName'], serializer.data['email'], user_otp)
+        try:
+            user = User.objects.get(email=serializer.data['email'])
             return Response({
-                'status': 'success',
-                'message': 'User registered successfully. An OTP has been sent to mail',
-            })
+                'message':'Email already exists',
+            },status=status.HTTP_400_BAD_REQUEST)
+        except User.DoesNotExist:
+            try:
+                username = User.objects.get(username=serializer.data['username'])
+                return Response({
+                    'message':'Username already exists',
+                },status=status.HTTP_400_BAD_REQUEST)
+            except User.DoesNotExist:
+                hashed_password = encryption_helper.hash(serializer.data['password'])
+                with transaction.atomic():
+                    user = User.objects.create(firstName=serializer.data['firstName'], lastName=serializer.data['lastName'],email=serializer.data['email'],password=hashed_password,username=serializer.data['username'],phoneNumber=serializer.data['phoneNumber'])
+                    user_otp = otp.generate_otp(user)
+                    createWallet(user)
+                    mailer.send_otp_mail(serializer.data['firstName'], serializer.data['email'], user_otp)
+                    return Response({
+                        'status': 'success',
+                        'message': 'User registered successfully. An OTP has been sent to mail',
+                    })
 
 class ResendOTPView(APIView):
     def post(self, request):
