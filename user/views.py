@@ -3,8 +3,10 @@ from django.db import transaction, IntegrityError
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
+
+from Divyd_be import settings
 from .models import *
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from rest_framework.views import APIView
@@ -12,10 +14,67 @@ from .serializers import *
 from helpers import encryption_helper, otp, kora_functions
 from mailer import mailer
 from wallet.views import createWallet
+from google.oauth2 import id_token as g_id_token
+from google.auth.transport import requests as g_requests
+def unique_username_from_email(email):
+    base = email.split('@')[0]
+    username = base
+    suffix = 1
+    while User.objects.filter(username=username).exists():
+        username = base + str(suffix)
+        suffix += 1
+    return username
+
+def mark_verified(user):
+    user.is_email_verified = True
+    update_last_login(user.email)
+    user.save(update_fields=['is_email_verified'])
+
+    otp_obj,_= UserOTP.objects.get_or_create(user=user)
+    otp_obj.otp = None
+    otp_obj.save(update_fields=['otp'])
 def update_last_login(email):
     user = User.objects.get(email=email)
     user.last_login = timezone.now()
     user.save()
+
+class GoogleAuthView(APIView):
+    def post(self, request):
+        token = request.data.get('token')
+        if not token:
+            return Response({'error': 'Token is missing'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            idinfo = g_id_token.verify_oauth2_token(token,g_requests.Request())
+            if idinfo.get("aud") != settings.GOOGLE_CLIENT_ID:
+                return Response({"message": "Invalid audience for Google token"}, status=400)
+            if idinfo.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+                return Response({"message": "Invalid issuer for Google token"}, status=400)
+            if not idinfo.get("email"):
+                return Response({"message": "Google token missing email scope"}, status=400)
+            email = idinfo["email"]
+            first_name = idinfo.get("given_name", "") or ""
+            last_name = idinfo.get("family_name", "") or ""
+            user, created = User.objects.get_or_create(email=email,
+                                                       defaults={
+                                                           "firstName": first_name,
+                                                           "lastName": last_name,
+                                                           "username": unique_username_from_email(email),
+                                                       })
+            if created and not user.password:
+                user.set_unusable_password()
+                user.save(update_fields=['password'])
+            mark_verified(user)
+            token = RefreshToken.for_user(user)
+            access_token = str(token.access_token)
+            return Response({
+                "message":"Registration successful",
+                "user": UserSerializer(user).data,
+                "access_token": access_token,
+            },status=200)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class UserRegistrationView(APIView):
     def post(self, request):
         body = request.data
@@ -282,8 +341,7 @@ class UserPasswordLoginView(APIView):
             , }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         try:
             user = User.objects.get(email=body['email'])
-            user_otp = UserOTP.objects.get(user=user)
-            if user_otp and user_otp.otp == None:
+            if user.is_email_verified == True:
                 if encryption_helper.verify_hash(str(body['password']),user.password):
                     token = RefreshToken.for_user(user)
                     access_token = str(token.access_token)
@@ -324,8 +382,7 @@ class UserPinLoginView(APIView):
             , }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         try:
             user = User.objects.get(email=body['email'])
-            user_otp = UserOTP.objects.get(user=user)
-            if user_otp and user_otp.otp == None:
+            if user.is_email_verified == True:
                 if encryption_helper.verify_hash(str(body['pin']),user.pin):
                     token = RefreshToken.for_user(user)
                     access_token = str(token.access_token)
