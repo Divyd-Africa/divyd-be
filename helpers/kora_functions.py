@@ -68,6 +68,7 @@ def generate_temp_account(amount, user):
         'Authorization':f"Bearer {secret}"
     })
     return response.json()
+
 ##TODO
 def transfer(amount, account, bank_code):
     pass

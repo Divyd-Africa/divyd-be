@@ -63,7 +63,7 @@ class GoogleAuthView(APIView):
             if created and not user.password:
                 user.set_unusable_password()
                 user.save(update_fields=['password'])
-            mark_verified(user)
+                mark_verified(user)
             token = RefreshToken.for_user(user)
             access_token = str(token.access_token)
             return Response({

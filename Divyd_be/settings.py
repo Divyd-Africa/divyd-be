@@ -49,7 +49,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'user',
     'rest_framework',
-    'wallet'
+    'wallet',
+    'bill'
 ]
 
 MIDDLEWARE = [
