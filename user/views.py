@@ -124,19 +124,14 @@ class ResendOTPView(APIView):
             user = User.objects.get(email=body['email'])
             ava_otp = UserOTP.objects.get(user=user)
             if ava_otp:
-                if user.is_email_verified == True:
-                    return Response({
-                        'message': 'User has been verififed, proceed to login'
-                    })
-                else:
-                    ava_otp.otp = otp.generate_otp(user)
-                    ava_otp.otp_created_at = timezone.now()
-                    ava_otp.save()
-                    mailer.send_otp_mail(user.firstName, user.email, ava_otp.otp)
-                    return Response({
-                        'status': 'success',
-                        'message': 'OTP sent successfully',
-                    }, status=status.HTTP_200_OK)
+                ava_otp.otp = otp.generate_otp(user)
+                ava_otp.otp_created_at = timezone.now()
+                ava_otp.save()
+                mailer.send_otp_mail(user.firstName, user.email, ava_otp.otp)
+                return Response({
+                    'status': 'success',
+                    'message': 'OTP sent successfully',
+                }, status=status.HTTP_200_OK)
             else:
                 new_otp = otp.generate_otp(user)
                 mailer.send_otp_mail(user.firstName, user.email, new_otp)
