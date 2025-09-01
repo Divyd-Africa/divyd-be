@@ -5,15 +5,18 @@ import uuid
 
 
 class Bill(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="bills_created"
+    SPLIT_TYPE_CHOICES = (
+        ("equal", "Equal"),
+        ("custom_amount", "Custom Amount"),
+        ("custom_percent", "Custom Percent"),
     )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    split_type = models.CharField(max_length=20, choices=SPLIT_TYPE_CHOICES, default="equal")
     created_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):

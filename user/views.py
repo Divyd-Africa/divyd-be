@@ -124,7 +124,7 @@ class ResendOTPView(APIView):
             user = User.objects.get(email=body['email'])
             ava_otp = UserOTP.objects.get(user=user)
             if ava_otp:
-                if ava_otp.otp == None:
+                if user.is_email_verified == True:
                     return Response({
                         'message': 'User has been verififed, proceed to login'
                     })

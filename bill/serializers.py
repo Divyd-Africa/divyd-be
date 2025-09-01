@@ -1,59 +1,109 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model
 from .models import *
 
-class BillSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Bill
-        fields = ["id", "title", "description", "total_amount", "created_at"]
+User = get_user_model()
 
-class BillParticipantSerializer(serializers.ModelSerializer):
-    user = serializers.CharField(source="user.username")
+class BillSplitInputSerializer(serializers.Serializer):
+    user = serializers.CharField()   # username or email
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    percent = serializers.DecimalField(max_digits=5, decimal_places=2, required=False)
 
-    class Meta:
-        model = BillSplit
-        fields = ["user", "amount", "status", "is_creator"]
-
-
-class BillListSerializer(serializers.ModelSerializer):
-    my_share = serializers.SerializerMethodField()
-    amount_owed_to_me = serializers.SerializerMethodField()
-    amount_i_owe = serializers.SerializerMethodField()
+class BillCreateSerializer(serializers.ModelSerializer):
+    participants = serializers.ListField(
+        child=serializers.CharField(), write_only=True, required=False
+    )
+    splits = BillSplitInputSerializer(many=True, write_only=True, required=False)
 
     class Meta:
         model = Bill
-        fields = ["id", "title", "total_amount", "created_at",
-                  "my_share", "amount_owed_to_me", "amount_i_owe"]
+        fields = ["title", "description", "total_amount", "split_type", "participants", "splits"]
 
-    def get_my_share(self, obj):
-        """Show how much THIS user owes in this bill"""
+    def create(self, validated_data):
         user = self.context["request"].user
-        split = obj.splits.filter(user=user).first()
-        return split.amount if split else None
+        split_type = validated_data["split_type"]
+        total_amount = validated_data["total_amount"]
 
-    def get_amount_owed_to_me(self, obj):
-        """If I am the creator, show how much others still owe me"""
-        user = self.context["request"].user
-        if obj.created_by != user:
-            return 0
-        return sum(s.amount for s in obj.splits.exclude(user=user).filter(status__in=["pending", "approved"]))
+        # create bill
+        bill = Bill.objects.create(
+            created_by=user,
+            title=validated_data["title"],
+            description=validated_data.get("description", ""),
+            total_amount=total_amount,
+            split_type=split_type,
+        )
 
-    def get_amount_i_owe(self, obj):
-        """If I’m just a participant, show what I still owe"""
-        user = self.context["request"].user
-        split = obj.splits.filter(user=user, status__in=["pending", "approved"]).first()
-        return split.amount if split else 0
+        # include creator always
+        participants = []
+        if split_type == "equal":
+            participants = validated_data.get("participants", [])
+        else:
+            participants = [split["user"] for split in validated_data.get("splits", [])]
 
+        # resolve users
+        users = []
+        for username in participants:
+            try:
+                u = User.objects.get(username=username)
+                users.append(u)
+            except User.DoesNotExist:
+                raise serializers.ValidationError(f"User {username} not found")
 
-class BillDetailSerializer(serializers.ModelSerializer):
-    participants = BillParticipantSerializer(source="splits", many=True)
-    my_share = serializers.SerializerMethodField()
+        # add creator as participant
+        all_users = [user] + users
 
-    class Meta:
-        model = Bill
-        fields = ["id", "title", "description", "total_amount",
-                  "created_at", "my_share", "participants"]
+        # create splits
+        if split_type == "equal":
+            share = total_amount / len(all_users)
+            for u in all_users:
+                BillSplit.objects.create(
+                    bill=bill,
+                    user=u,
+                    amount=share,
+                    status="paid" if u == user else "pending",
+                    is_creator=(u == user),
+                )
 
-    def get_my_share(self, obj):
-        user = self.context["request"].user
-        split = obj.splits.filter(user=user).first()
-        return split.amount if split else None
+        elif split_type == "custom_amount":
+            total_check = 0
+            for split in validated_data["splits"]:
+                u = User.objects.get(username=split["user"])
+                amt = split["amount"]
+                total_check += amt
+                BillSplit.objects.create(
+                    bill=bill,
+                    user=u,
+                    amount=amt,
+                    status="paid" if u == user else "pending",
+                    is_creator=(u == user),
+                )
+            # creator’s share = total - sum(custom amounts)
+            creator_share = total_amount - total_check
+            BillSplit.objects.create(
+                bill=bill,
+                user=user,
+                amount=creator_share,
+                status="paid",
+                is_creator=True,
+            )
+
+        elif split_type == "custom_percent":
+            total_percent = 0
+            for split in validated_data["splits"]:
+                u = User.objects.get(username=split["user"])
+                pct = split["percent"]
+                total_percent += pct
+                amt = (pct / 100) * total_amount
+                BillSplit.objects.create(
+                    bill=bill,
+                    user=u,
+                    amount=amt,
+                    status="paid" if u == user else "pending",
+                    is_creator=(u == user),
+                )
+            if total_percent != 100:
+                raise serializers.ValidationError("Percents must sum to 100")
+
+            # creator gets nothing extra (unless you want him included too in %)
+
+        return bill
