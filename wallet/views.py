@@ -9,7 +9,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
+import uuid
 from Divyd_be import settings
 from helpers import kora_functions
 from .models import *
@@ -109,5 +109,29 @@ def webhook(request):
     except Exception as err:
         print(str(err))
         return JsonResponse({"message": str(err)})
+
+def pay_debt(user,amount,bill_id,creator):
+    try:
+        debtor = Wallet.objects.get(user=user)
+        creditor = Wallet.objects.get(user=creator)
+    except Wallet.DoesNotExist:
+        return "User does not have a wallet"
+    if debtor.balance < amount:
+        return "insufficient"
+    try:
+        with transaction.atomic():
+            debtor.balance -= float(amount)
+            debtor.save()
+            Transaction.objects.create(wallet=debtor,transaction_type=Transaction.DEBIT,category=Transaction.TRANSFER,amount=amount,reference=uuid.uuid4().hex,description=f"Used to clear bill {bill_id}")
+            creditor.balance += float(amount)
+            creditor.save()
+            Transaction.objects.create(wallet=creditor,transaction_type=Transaction.CREDIT,category=Transaction.FUNDING,amount=amount,reference=uuid.uuid4().hex,description=f"Payment from {user.username} for {bill_id}")
+            return "success"
+    except Exception as e:
+        return str(e)
+
+
+
+
 
 

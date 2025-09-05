@@ -1,0 +1,38 @@
+version: '3.12'
+
+services:
+  web:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - redis
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+
+  db:
+    image: postgres:15
+    container_name: divyd_db
+    environment:
+      POSTGRES_DB: divyd
+      POSTGRES_USER: Olayimika
+      POSTGRES_PASSWORD: landlord.123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+  redis:
+    image: redis:7
+    container_name: divyd_redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres_data:

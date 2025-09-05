@@ -128,15 +128,21 @@ class BillCreateSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "username", "email"]  # adjust to your User model
+        fields = ["id", "username", "email"]
+        # adjust to your User model
 
+class SecBillSerializer(serializers.ModelSerializer):
+    created_by = UserSerializer(read_only=True)
+    class Meta:
+        model = Bill
+        fields = ["title","total_amount","id","created_by"]
 
 class BillSplitSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)  # show user details, not just ID
-
+    bill = SecBillSerializer(read_only=True)
     class Meta:
         model = BillSplit
-        fields = ["id", "user", "amount", "status", "is_creator", "updated_at"]
+        fields = ["id", "user", "amount", "status", "is_creator", "updated_at","bill"]
 
 
 class SingleBillSerializer(serializers.ModelSerializer):

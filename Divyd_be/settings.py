@@ -108,20 +108,44 @@ WSGI_APPLICATION = 'Divyd_be.wsgi.application'
 #         'NAME': BASE_DIR / 'db.sqlite3',
 #     }
 # }
-
-DATABASES = {
-    'default':dj_database_url.config(
-        default=os.getenv('DB_URL2'),
-        conn_max_age=600
-    )
-}
-
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'mycache',
+USE_SUPABASE = os.getenv("USE_SUPABASE", "false").lower() == "true"
+if USE_SUPABASE:
+    DATABASES = {
+        'default':dj_database_url.config(
+            default=os.getenv('DB_URL2'),
+            conn_max_age=600
+        )
     }
-}
+else:
+    DATABASES = {
+        'default':{
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('DATABASE_NAME'),
+            'USER': os.getenv('DATABASE_USER'),
+            'PASSWORD': os.getenv('DATABASE_PASSWORD'),
+            'HOST': os.getenv('DATABASE_HOST'),
+            'PORT': os.getenv('DATABASE_PORT'),
+        }
+    }
+
+USE_REDIS = os.getenv("USE_SUPABASE", "false").lower() == "true"
+if USE_REDIS:
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": "redis://redis:6379/1",  # 'redis' = service name in docker-compose
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            }
+        }
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'mycache',
+        }
+    }
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
