@@ -110,26 +110,60 @@ def webhook(request):
         print(str(err))
         return JsonResponse({"message": str(err)})
 
-def pay_debt(user,amount,bill_id,creator):
-    try:
-        debtor = Wallet.objects.get(user=user)
-        creditor = Wallet.objects.get(user=creator)
-    except Wallet.DoesNotExist:
-        return "User does not have a wallet"
-    if debtor.balance < amount:
-        return "insufficient"
+def pay_debt(user, amount, bill_id, creator, reference=None, meta=None):
+    """
+    Pay debt from one wallet to another.
+    Idempotent: prevents double charges by reference.
+    """
+    if reference is None:
+        reference = f"{bill_id}-{user.id}-{creator.id}"
+
     try:
         with transaction.atomic():
-            debtor.balance -= float(amount)
-            debtor.save()
-            Transaction.objects.create(wallet=debtor,transaction_type=Transaction.DEBIT,category=Transaction.TRANSFER,amount=amount,reference=uuid.uuid4().hex,description=f"Used to clear bill {bill_id}")
-            creditor.balance += float(amount)
-            creditor.save()
-            Transaction.objects.create(wallet=creditor,transaction_type=Transaction.CREDIT,category=Transaction.FUNDING,amount=amount,reference=uuid.uuid4().hex,description=f"Payment from {user.username} for {bill_id}")
+            # fetch wallets inside transaction
+            debtor_wallet = Wallet.objects.select_for_update().get(user=user)
+            creditor_wallet = Wallet.objects.select_for_update().get(user=creator)
+
+            # check idempotency
+            if Transaction.objects.filter(reference=reference, transaction_type=Transaction.DEBIT).exists():
+                return "already_processed"
+
+            # check balance
+            if debtor_wallet.balance < amount:
+                return "insufficient"
+
+            # debit debtor
+            debtor_wallet.balance -= float(amount)
+            debtor_wallet.save()
+            Transaction.objects.create(
+                wallet=debtor_wallet,
+                transaction_type=Transaction.DEBIT,
+                category=Transaction.TRANSFER,
+                amount=amount,
+                reference=reference,
+                description=f"Payment for bill {bill_id}",
+                meta=meta or {},
+            )
+
+            # credit creator
+            creditor_wallet.balance += float(amount)
+            creditor_wallet.save()
+            Transaction.objects.create(
+                wallet=creditor_wallet,
+                transaction_type=Transaction.CREDIT,
+                category=Transaction.FUNDING,
+                amount=amount,
+                reference=f"{reference}-credit",
+                description=f"Payment from {user.username} for bill {bill_id}",
+                meta=meta or {},
+            )
+
             return "success"
+
+    except Wallet.DoesNotExist:
+        return "User does not have a wallet"
     except Exception as e:
         return str(e)
-
 
 
 

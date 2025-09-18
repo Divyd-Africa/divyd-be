@@ -96,3 +96,94 @@ class SplitHistory(models.Model):
 
     def __str__(self):
         return f"{self.action} by {self.performed_by} on {self.split}"
+
+class RecurringBill(models.Model):
+    bill = models.ForeignKey(Bill, on_delete=models.CASCADE, related_name="recurring_bills", null=True, blank=True)
+    creator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="recurring_bills")
+    # participants = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="recurring_debts")
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    frequency = models.CharField(max_length=20, choices=[
+        ("monthly", "Monthly"),
+        ("weekly", "Weekly"),
+        ("daily", "Daily"),
+        ("yearly","Yearly"),
+    ])
+    next_run=models.DateTimeField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    def __str__(self):
+        return f"{self.bill.title} by {self.creator}"
+
+class RecurringBillParticipant(models.Model):
+    recurring_bill = models.ForeignKey(RecurringBill, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    status = models.CharField(max_length=20, choices=[
+        ("pending", "Pending"),
+        ("accepted", "Accepted"),
+        ("rejected", "Rejected"),
+    ], default="pending")
+    joined_at = models.DateTimeField(auto_now_add=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    missed_cycles = models.PositiveIntegerField(
+        default=0,
+        help_text="How many billing cycles this user has missed"
+    )
+
+    # optional: if you want to mark *why* they were cancelled
+    cancellation_reason = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True
+    )
+
+    def total_due(self):
+        """
+        Total amount currently owed by this participant,
+        including arrears (missed cycles + current cycle).
+        """
+        return self.amount * (1 + self.missed_cycles)
+
+    def __str__(self):
+        return f"{self.user.username} in {self.recurring_bill} ({self.status})"
+
+
+class RecurringBillLog(models.Model):
+    SUCCESS = "success"
+    FAILED = "failed"
+    SKIPPED = "skipped"   # e.g. when user had insufficient funds, and you skip retry until next cycle
+
+    STATUS_CHOICES = [
+        (SUCCESS, "Success"),
+        (FAILED, "Failed"),
+        (SKIPPED, "Skipped"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    recurring_bill = models.ForeignKey(
+        "RecurringBill", on_delete=models.CASCADE, related_name="logs"
+    )
+    user = models.ForeignKey(
+        "user.User", on_delete=models.CASCADE, related_name="recurring_bill_logs"
+    )
+
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    reference = models.CharField(max_length=120, unique=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES)
+    attempt_number = models.PositiveIntegerField(default=1)
+
+    # light but useful metadata
+    message = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["recurring_bill", "user", "status"]),
+            models.Index(fields=["created_at"]),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.recurring_bill.bill.title} - {self.user.username} - {self.status}"
+
+

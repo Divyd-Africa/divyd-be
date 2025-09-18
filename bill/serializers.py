@@ -2,8 +2,18 @@ from django.db import transaction
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import *
-
+from .tasks import *
 User = get_user_model()
+
+def calculate_next_date(frequency):
+    if frequency == "monthly":
+        return now() + relativedelta(months=1)
+    elif frequency == "weekly":
+        return now() + relativedelta(weeks=1)
+    elif frequency == "yearly":
+        return now() + relativedelta(years=1)
+    elif frequency == "daily":
+        return now() + relativedelta(days=1)
 
 
 class BillSplitInputSerializer(serializers.Serializer):
@@ -11,6 +21,50 @@ class BillSplitInputSerializer(serializers.Serializer):
     amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     percent = serializers.DecimalField(max_digits=5, decimal_places=2, required=False)
 
+class ReBillCreateSerializer(serializers.ModelSerializer):
+    participants = serializers.ListField(
+        child=serializers.CharField(), write_only=True, required=False
+    )
+    splits = BillSplitInputSerializer(many=True, required=False, write_only=True)
+
+    class Meta:
+        model = RecurringBill
+        fields = ["frequency", "participants","splits"]
+
+    def create(self, validated_data):
+        user = self.context["request"].user
+
+        with transaction.atomic():
+            bill_serializer = BillCreateSerializer(data={
+                "created_by":user,
+                "title": self.context["request"].data.get("title"),
+                "description": self.context["request"].data.get("description", ""),
+                "total_amount": self.context["request"].data.get("total_amount"),
+                "split_type": self.context["request"].data.get("split_type"),
+                "participants": validated_data.get("participants", []),
+                "splits": validated_data.get("splits", []),
+            },context=self.context)
+            bill_serializer.is_valid(raise_exception=True)
+            bill = bill_serializer.save()
+
+            recurring_bill = RecurringBill.objects.create(
+                bill=bill,
+                creator=user,
+                amount=self.context["request"].data.get("total_amount"),
+                frequency=self.context["request"].data.get("frequency"),
+                next_run= calculate_next_date(validated_data["frequency"]),
+                is_active=True
+            )
+            for split in bill.splits.all():
+                if not split.is_creator:
+                    RecurringBillParticipant.objects.create(
+                        recurring_bill=recurring_bill,
+                        user=split.user,
+                        amount=split.amount,
+                        status="pending",
+                        missed_cycles=1
+                    )
+            return recurring_bill
 
 class BillCreateSerializer(serializers.ModelSerializer):
     participants = serializers.ListField(
@@ -60,13 +114,16 @@ class BillCreateSerializer(serializers.ModelSerializer):
             if split_type == "equal":
                 share = total_amount / len(all_users)
                 for u in all_users:
-                    BillSplit.objects.create(
+                    bill_split = BillSplit.objects.create(
                         bill=bill,
                         user=u,
                         amount=share,
                         status="paid" if u == user else "pending",
                         is_creator=(u == user),
                     )
+                    bill_data = BillSplitSerializer(bill_split).data
+                    if u != user:
+                        send_new_bill_alert.delay(user.id, u.id, bill_data)
 
 
             elif split_type == "custom_amount":
@@ -77,13 +134,17 @@ class BillCreateSerializer(serializers.ModelSerializer):
                     total_check += amt
                     if total_check > total_amount:
                         raise serializers.ValidationError("Custom amounts cannot exceed total bill amount.")
-                    BillSplit.objects.create(
+                    bill_split = BillSplit.objects.create(
                         bill=bill,
                         user=u,
                         amount=amt,
                         status="paid" if u == user else "pending",
                         is_creator=(u == user),
                     )
+                    bill_data = BillSplitSerializer(bill_split).data
+                    if u != user:
+                        send_new_bill_alert.delay(user.id, u.id, bill_data)
+
 
                 # If total is less, assign remainder to creator
 
@@ -105,13 +166,16 @@ class BillCreateSerializer(serializers.ModelSerializer):
                     if total_percent > 100:
                         raise serializers.ValidationError("Custom percentages cannot exceed 100.")
                     amt = (pct / 100) * total_amount
-                    BillSplit.objects.create(
+                    bill_split = BillSplit.objects.create(
                         bill=bill,
                         user=u,
                         amount=amt,
                         status="paid" if u == user else "pending",
                         is_creator=(u == user),
                     )
+                    bill_data = BillSplitSerializer(bill_split).data
+                    if u != user:
+                        send_new_bill_alert.delay(user.id,u.id,bill_data)
                 # If total is less than 100, creator takes the remainder
                 if total_percent < 100:
                     creator_share = (100 - total_percent) / 100 * total_amount
@@ -196,3 +260,27 @@ class BillSerializer(serializers.ModelSerializer):
             "total_paid",
             "total_pending",
         ]
+
+class ReBillSerializer(serializers.ModelSerializer):
+    participants = serializers.SerializerMethodField()
+    creator = UserSerializer(read_only=True)
+
+    class Meta:
+        model = RecurringBill
+        fields = ["id", "creator", "amount", "frequency", "next_run", "is_active", "created_at", "bill", "participants"]
+
+    def get_participants(self, obj):
+        return [
+            {
+                "user": p.user.username,
+                "amount": p.amount,
+                "status": p.status,
+            }
+            for p in obj.recurringbillparticipant_set.all()
+        ]
+
+class ParticipantSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    class Meta:
+        model = RecurringBillParticipant
+        fields = "__all__"

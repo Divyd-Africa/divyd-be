@@ -33,6 +33,23 @@ services:
     container_name: divyd_redis
     ports:
       - "6379:6379"
+  celery_worker:
+    build: .
+    command: celery -A Divyd_be worker -l info
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+      - web
+  celery-beat:
+    build: .
+    command: celery -A Divyd_be beat -l info
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+      - web
+
 
 volumes:
   postgres_data:

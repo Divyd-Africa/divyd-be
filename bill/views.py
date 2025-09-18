@@ -1,5 +1,5 @@
 import decimal
-
+from .tasks import *
 from django.db.models import Sum, Case, When, DecimalField
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -97,6 +97,8 @@ class AcceptSplitView(APIView):
             },status=status.HTTP_400_BAD_REQUEST)
         split.status = "approved"
         split.save()
+        data = BillSerializer(split.bill).data
+        send_accepted_bill_alert.delay(split.bill.created_by.id,split.user.username,data)
         try:
             cleared = pay_debt(request.user,split.amount,split.bill.id,split.bill.created_by)
             if cleared == "success":
@@ -131,6 +133,8 @@ class PaySplitView(APIView):
             if cleared == "success":
                 split.status = "paid"
                 split.save()
+                data = BillSerializer(split.bill).data
+                send_paid_bill_alert.delay(split.bill.created_by.id, split.user.username, data)
                 return Response({
                     "message":"Bill has been cleared",
                     "data":BillSplitSerializer(split).data
@@ -165,6 +169,8 @@ class DeclineSplitView(APIView):
             with transaction.atomic():
                 split.status = "declined"
                 split.save()
+                data = BillSerializer(split.bill).data
+                send_declined_bill_alert.delay(split.bill.created_by.id, split.user.username, data)
                 creator_split = BillSplit.objects.get(bill=split.bill, is_creator=True)
                 creator_split.amount += split.amount
                 creator_split.save()
@@ -174,7 +180,100 @@ class DeclineSplitView(APIView):
 
 
 
+class CreateRecurringBillView(APIView):
+    permission_classes = [IsAuthenticated]
+    def post(self, request):
+        data = request.data
+        try:
+            serializer = ReBillCreateSerializer(data=data, context={"request": request})
+            if serializer.is_valid():
+                bill = serializer.save()
+                return Response({"message": "Bill created", "bill_id": str(bill.id),
+                                 "bill_details": ReBillSerializer(bill).data}, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                "message": str(e),
+            },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+class AcceptRecurringBillView(APIView):
+    permission_classes = [IsAuthenticated]
+    def put(self, request, bill_id):
+        user=request.user
+        try:
+            participant = RecurringBillParticipant.objects.get(id=bill_id, user=user)
+        except RecurringBillParticipant.DoesNotExist:
+            return Response({
+                "message": "Bill not found",
+            },status=status.HTTP_404_NOT_FOUND)
+        participant.status = "accepted"
+        participant.save(update_fields=["status"])
+        try:
+            bill_spilt = BillSplit.objects.get(bill=participant.recurring_bill.bill, user=user)
+            bill_spilt.status = "approved"
+            bill_spilt.save(update_fields=["status"])
+        except BillSplit.DoesNotExist:
+            BillSplit.objects.create(
+                bill=participant.recurring_bill.bill,
+                user=user,
+                amount=participant.amount,
+                status="approved",
+                is_creator=False
+            )
+        return Response({
+            "message": "Bill has been accepted",
+        },status=status.HTTP_200_OK)
 
+class DeclineRecurringBillView(APIView):
+    permission_classes = [IsAuthenticated]
+    def put(self, request, bill_id):
+        user=request.user
+        try:
+            participant = RecurringBillParticipant.objects.get(id=bill_id, user=user)
+        except RecurringBillParticipant.DoesNotExist:
+            return Response({
+                "message": "Bill not found",
+            },status=status.HTTP_404_NOT_FOUND)
+        participant.status = "rejected"
+        participant.save(update_fields=["status"])
+        try:
+            bill_spilt = BillSplit.objects.get(bill=participant.recurring_bill.bill, user=user)
+            bill_spilt.status = "declined"
+            bill_spilt.save(update_fields=["status"])
+        except Exception as e:
+            return Response({
+                "message": str(e),
+            },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class CancelBillView(APIView):
+    permission_classes = [IsAuthenticated]
+    def put(self, request, bill_id):
+        user=request.user
+        try:
+            participant = RecurringBillParticipant.objects.get(id=bill_id, user=user)
+        except RecurringBillParticipant.DoesNotExist:
+            return Response({
+                "message": "Bill not found",
+            },status=status.HTTP_404_NOT_FOUND)
+        participant.status = "rejected"
+        participant.save(update_fields=["status"])
+        return Response({
+            "message": "Bill has been cancelled",
+        },status=status.HTTP_200_OK)
+
+class GetAllRecurringBillsView(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        user=request.user
+        try:
+            participant = RecurringBillParticipant.objects.filter(user=user)
+            return Response({
+                "message": "Recurring Bills",
+                "data":ParticipantSerializer(participant, many=True).data
+            })
+        except Exception as e:
+            return Response({
+                "message": str(e),
+            },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

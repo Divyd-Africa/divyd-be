@@ -5,7 +5,7 @@ from rest_framework import status
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-
+from notifications import notification
 from Divyd_be import settings
 from .models import *
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
@@ -37,6 +37,22 @@ def update_last_login(email):
     user = User.objects.get(email=email)
     user.last_login = timezone.now()
     user.save()
+def set_device_token(user,token):
+    user_device, created = UserDevice.objects.update_or_create(
+        user=user,
+        defaults={"device_token": token}
+    )
+
+def check_same_device(user,token):
+    try:
+        device = UserDevice.objects.get(user=user)
+        if device.device_token == token:
+            return True
+        else:
+            return False
+    except UserDevice.DoesNotExist:
+        return False
+
 
 class GoogleAuthView(APIView):
     def post(self, request):
@@ -154,6 +170,10 @@ class VerifyEmailView(APIView):
             return Response({
                 'message':'otp is required'
             },status=status.HTTP_400_BAD_REQUEST)
+        if not body['token'] or not isinstance(body['token'], str):
+            return Response({
+                'message':'device token is required'
+            },status=status.HTTP_400_BAD_REQUEST)
         try:
             validate_email(body['email'])
         except ValidationError:
@@ -162,7 +182,6 @@ class VerifyEmailView(APIView):
             },status=status.HTTP_400_BAD_REQUEST)
         try:
             input_otp = int(body['otp'])
-            print(input_otp)
             user = User.objects.get(email=body['email'])
             valid, message = otp.verify_otp(user, input_otp)
             if valid == False:
@@ -172,7 +191,7 @@ class VerifyEmailView(APIView):
             else:
                 user.is_email_verified = True
                 user.save()
-
+                set_device_token(user, body['token'])
                 return Response({
                     'status': 'success',
                     'message': 'Email verified successfully'
@@ -181,6 +200,38 @@ class VerifyEmailView(APIView):
             return Response({
                 'message':'email is not registered on the app'
             },status=status.HTTP_400_BAD_REQUEST)
+
+class ChangeDeviceView(APIView):
+    def put(self, request):
+        body = request.data
+        if not body['email'] or not isinstance(body['email'], str):
+            return Response({"message":"email is required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not body['otp'] or not isinstance(body['otp'], int):
+            return Response({"message":"otp is required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not body['token'] or not isinstance(body['token'], str):
+            return Response({"message":"device token is required"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            input_otp = int(body['otp'])
+            user = User.objects.get(email=body['email'])
+            valid, message = otp.verify_otp(user, input_otp)
+            if valid == False:
+                return Response({
+                    'message': message
+                }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                set_device_token(user, body['token'])
+                return Response({
+                    'status': 'success',
+                    'message':"Device changed successfully"
+                },status=status.HTTP_200_OK)
+        except User.DoesNotExist:
+            return Response({
+                'message':'email is not registered on the app'
+            },status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                'message': str(e)
+            },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class ResetPasswordView(APIView):
     def post(self, request):
@@ -334,23 +385,32 @@ class UserPasswordLoginView(APIView):
             return Response({
                 'message':'Password is required'
             , }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if not body["token"] or not isinstance(body["token"], str):
+            return Response({
+                'message':'device token is required'
+            },status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         try:
             user = User.objects.get(email=body['email'])
             if user.is_email_verified == True:
-                if encryption_helper.verify_hash(str(body['password']),user.password):
-                    token = RefreshToken.for_user(user)
-                    access_token = str(token.access_token)
-                    update_last_login(user.email)
-                    return Response({
-                        'status': 'success',
-                        'message':'Login Successful',
-                        'user':UserSerializer(user).data,
-                        'access_token':access_token,
-                    }, status=status.HTTP_200_OK)
+                if check_same_device(user, body['token']):
+                    if encryption_helper.verify_hash(str(body['password']),user.password):
+                        token = RefreshToken.for_user(user)
+                        access_token = str(token.access_token)
+                        update_last_login(user.email)
+                        return Response({
+                            'status': 'success',
+                            'message':'Login Successful',
+                            'user':UserSerializer(user).data,
+                            'access_token':access_token,
+                        }, status=status.HTTP_200_OK)
+                    else:
+                        return Response({
+                            'message':'Incorrect Password'
+                        }, status=status.HTTP_403_FORBIDDEN)
                 else:
                     return Response({
-                        'message':'Incorrect Password'
-                    }, status=status.HTTP_403_FORBIDDEN)
+                        "message":"This is a new device please register it"
+                    },status=status.HTTP_400_BAD_REQUEST)
             else:
                 return Response({
                     'message':'Email is not verified'
@@ -373,25 +433,34 @@ class UserPinLoginView(APIView):
             }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         if not body['pin'] or not isinstance(body['pin'], int):
             return Response({
-                'message':'Password is required'
+                'message':'Pin is required'
             , }, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if not body["token"] or not isinstance(body["token"], str):
+            return Response({
+                'message':'device token is required'
+            },status=status.HTTP_422_UNPROCESSABLE_ENTITY)
         try:
             user = User.objects.get(email=body['email'])
             if user.is_email_verified == True:
-                if encryption_helper.verify_hash(str(body['pin']),user.pin):
-                    token = RefreshToken.for_user(user)
-                    access_token = str(token.access_token)
-                    update_last_login(user.email)
-                    return Response({
-                        'status': 'success',
-                        'message':'Login Successful',
-                        'user':UserSerializer(user).data,
-                        'access_token':access_token,
-                    }, status=status.HTTP_200_OK)
+                if check_same_device(user, body['token']):
+                    if encryption_helper.verify_hash(str(body['pin']),user.pin):
+                        token = RefreshToken.for_user(user)
+                        access_token = str(token.access_token)
+                        update_last_login(user.email)
+                        return Response({
+                            'status': 'success',
+                            'message':'Login Successful',
+                            'user':UserSerializer(user).data,
+                            'access_token':access_token,
+                        }, status=status.HTTP_200_OK)
+                    else:
+                        return Response({
+                            'message':'Incorrect Pin'
+                        }, status=status.HTTP_403_FORBIDDEN)
                 else:
                     return Response({
-                        'message':'Incorrect Pin'
-                    }, status=status.HTTP_403_FORBIDDEN)
+                        "message":"This is a new device please register it"
+                    },status=status.HTTP_400_BAD_REQUEST)
             else:
                 return Response({
                     'message':'Email is not verified'
@@ -504,3 +573,126 @@ class TestView(APIView):
         return Response({
             'response':response
         })
+
+
+class FriendView(APIView):
+    permission_classes = [IsAuthenticated]
+    def post(self, request):
+        body = request.data
+        if not body['username'] or not isinstance(body['username'], str):
+            return Response({
+                'message':'Username is required'
+            },status=status.HTTP_400_BAD_REQUEST)
+        try:
+            user = User.objects.get(username=body['username'])
+            new_friend = Friend.objects.create(user=request.user,friend=user)
+            return Response({
+                'status': 'success',
+                'message': 'Friend created',
+                'details':FriendSerializer(new_friend).data
+            },status=status.HTTP_201_CREATED)
+        except User.DoesNotExist:
+            return Response({
+                'message':'Friend not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except IntegrityError:
+            return Response({
+                'message':'Friend already exists'
+            },status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                'message':f'Friend creation failed with {e}',
+            },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    def get(self, request):
+        user = User.objects.get(username=request.user.username)
+        friends = FriendSerializer(user.friends.all(), many=True)
+        return Response({
+            'status': 'success',
+            'message': 'Friend list',
+            'friends': friends.data
+        },status=status.HTTP_200_OK)
+
+class GroupView(APIView):
+    permission_classes = [IsAuthenticated]
+    def post(self, request):
+        body = request.data
+        print(body)
+        if not body['title'] or not isinstance(body['title'], str):
+            return Response({
+                'message':'Title is required as string'
+            },status=status.HTTP_400_BAD_REQUEST)
+        try:
+            group = Group.objects.create(name=body['title'],creator=request.user)
+            return Response({
+                'status': 'success',
+                'message': 'Group created',
+                'group': GroupSerializer(group).data
+            },status=status.HTTP_201_CREATED)
+        except IntegrityError:
+            return Response({
+                'message':'Group already exists'
+            },status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                'message':f'Group creation failed with {e}',
+            },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get(self, request):
+        user = User.objects.get(username=request.user.username)
+        groups = GroupSerializer(user.groups.all(), many=True)
+        return Response({
+            'status': 'success',
+            'message': 'Group list',
+            'groups': groups.data
+        },status=status.HTTP_200_OK)
+
+class SpecificGroupView(APIView):
+    permission_classes = [IsAuthenticated]
+    def post(self, request,id):
+        body = request.data
+        if not body['users'] or not isinstance(body['users'], list):
+            return Response({
+                'message':'Friends is required as array'
+            },status=status.HTTP_400_BAD_REQUEST)
+        try:
+            not_found = []
+            present = []
+            group = Group.objects.get(id=id)
+            for username in body['users']:
+                try:
+                    user = User.objects.get(username=username)
+                    GroupMember.objects.create(group=group,user=user)
+                except User.DoesNotExist:
+                    not_found.append(username)
+                except IntegrityError:
+                    present.append(username)
+
+            return Response({
+                'status': 'success',
+                'message':f"members added to {group.name} list",
+                'memebers':GroupMemberSerializer(group.members.all(), many=True).data,
+                "invalid usernames":not_found,
+                "duplicate usernames":present,
+            }, status=status.HTTP_200_OK)
+        except Group.DoesNotExist:
+            return Response({
+                'message':'Group not found',
+            },status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'message':f'Group creation failed with {e}',
+            },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get(self, request, id):
+        group = Group.objects.get(id=id)
+        members = GroupMemberSerializer(group.members.all(), many=True)
+        return Response({
+            'status': 'success',
+            'message': 'Members',
+            'groups': members.data
+        }, status=status.HTTP_200_OK)
+
+
+
+
+

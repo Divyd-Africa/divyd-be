@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 import os
 import certifi
+from celery.schedules import crontab
+
 os.environ['SSL_CERT_FILE'] = certifi.where()
 import datetime
 
@@ -50,7 +52,8 @@ INSTALLED_APPS = [
     'user',
     'rest_framework',
     'wallet',
-    'bill'
+    'bill',
+    'django_celery_beat'
 ]
 
 MIDDLEWARE = [
@@ -201,3 +204,38 @@ KORA_PUBLIC = os.getenv('KORA_PUBLIC')
 KORA_ENCRYPTION = os.getenv('KORA_ENCRYPTION')
 
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
+SERVICE_FILE_PATH = os.getenv('SERVICE_FILE_PATH')
+
+CELERY_BROKER_URL = "redis://redis:6379/0"
+CELERY_RESULT_BACKEND = "redis://redis:6379/0"
+
+CELERY_BEAT_SCHEDULE = {
+    "process-recurring-bills-daily":{
+        "task":"bill.tasks.process_due_recurring_bills",
+        # "schedule": crontab(hour=23, minute=55)
+        "schedule":60
+    }
+}
+
+import logging
+from celery.utils.log import get_task_logger
+
+logger = get_task_logger(__name__)
+
+CELERYD_HIJACK_ROOT_LOGGER = False  # Let Django handle logging
+CELERYD_LOG_COLOR = False
+
+# Optional: configure Django logging to see Celery logs in console
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+}
