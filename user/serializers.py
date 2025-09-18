@@ -24,3 +24,20 @@ class UserBankSerializer(serializers.Serializer):
     class Meta:
         model = UserBank
         fields = '__all__'
+
+class FriendSerializer(serializers.ModelSerializer):
+    friend = UserSerializer(read_only=True)
+    class Meta:
+        model = Friend
+        fields = ['id','friend']
+
+class GroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Group
+        fields = '__all__'
+
+class GroupMemberSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    class Meta:
+        model = GroupMember
+        fields = ['id','user']

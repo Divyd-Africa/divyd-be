@@ -64,3 +64,42 @@ class UserBank(models.Model):
 
     def __str__(self):
         return self.user.username
+
+class UserDevice(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    device_token = models.CharField(verbose_name='Device Code', max_length=255)
+    updated_at = models.DateTimeField(verbose_name='Updated At', auto_now=True)
+
+    def __str__(self):
+        return f"{self.user.username}'s device"
+
+class Friend(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='friends')
+    friend = models.ForeignKey(User, on_delete=models.CASCADE, related_name='beneficiary')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'friend')
+
+    def __str__(self):
+        return f"{self.user.username}- {self.friend.username}"
+
+class Group(models.Model):
+    name = models.CharField(verbose_name='Group Name', max_length=255,)
+    creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='groups')
+    created_at = models.DateTimeField(verbose_name='Created At', auto_now=True)
+    class Meta:
+        unique_together = ('name', 'creator')
+    def __str__(self):
+        return f"{self.name} by {self.creator.username}"
+
+class GroupMember(models.Model):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='members')
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("group", "user")  # prevents duplicates
+
+    def __str__(self):
+        return f"{self.user.username} in {self.group.name}"

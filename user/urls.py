@@ -13,4 +13,8 @@ urlpatterns = [
     path('bank-account',BankAccountView.as_view(),name='bank-account'),
     path('test',TestView.as_view(),name='test'),
     path('google-auth',GoogleAuthView.as_view(),name='google-auth'),
+    path('change-device',ChangeDeviceView.as_view(),name='change-device'),
+    path('friends',FriendView.as_view(),name='friends'),
+    path('groups',GroupView.as_view(),name='groups'),
+    path('groups/<int:id>',SpecificGroupView.as_view(),name='specific-group'),
 ]

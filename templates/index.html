@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>FCM Token Fetcher</title>
+</head>
+<body>
+  <h2>FCM Token Fetcher</h2>
+  <button id="getTokenBtn">Get Token</button>
+  <p id="token"></p>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+    import { getMessaging, getToken } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging.js";
+
+    // 🔥 Replace with your Firebase project config
+    const firebaseConfig = {
+  apiKey: "AIzaSyCL68x6i42NOHM_9Cost5SoWUuBq5604WM",
+  authDomain: "testing-divyd.firebaseapp.com",
+  projectId: "testing-divyd",
+  storageBucket: "testing-divyd.firebasestorage.app",
+  messagingSenderId: "706517445001",
+  appId: "1:706517445001:web:787b727a514d1734719958",
+  measurementId: "G-JKWP4VR9SJ"
+}
+
+
+    // Init
+    const app = initializeApp(firebaseConfig);
+    const messaging = getMessaging(app);
+
+    // Function to request permission + get token
+    async function fetchToken(registration) {
+      try {
+        const token = await getToken(messaging, {
+          vapidKey: "BN3xcwc5L26Ww73j4gwfO8zSwtTKcrhTG9Pj9_Woi1ITZbNyLIKalsqn0FqLUCI0-R_bK4ruL27_Or8li6L5H7Y", // from Firebase Console
+          serviceWorkerRegistration: registration,
+        });
+
+        if (token) {
+          document.getElementById("token").innerText = token;
+          console.log("🔥 Token:", token);
+        } else {
+          document.getElementById("token").innerText = "No token (permission not granted)";
+        }
+      } catch (err) {
+        console.error("Error getting token:", err);
+      }
+    }
+
+    // Wait for SW registration
+    window.onload = async () => {
+      try {
+        const registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+        console.log("✅ Service Worker registered:", registration);
+
+        document.getElementById("getTokenBtn").addEventListener("click", () => {
+          fetchToken(registration);
+        });
+      } catch (err) {
+        console.error("SW registration failed:", err);
+      }
+    };
+  </script>
+</body>
+</html>
