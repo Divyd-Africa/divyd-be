@@ -693,6 +693,32 @@ class SpecificGroupView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+class GetUser(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        body = request.data
+        if not body['username'] or not isinstance(body['username'], str):
+            return Response({
+                'message':'Username is required as string'
+            })
+        try:
+            user = User.objects.get(username=body['username'])
+            return Response({
+                'status': 'success',
+                'message': 'User',
+                'user': UserSerializer(user).data
+            },status=status.HTTP_200_OK)
+        except User.DoesNotExist:
+            return Response({
+                'message':'User not found'
+            },status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'message':f'User fetch failed with {e}',
+            },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
 
 
 

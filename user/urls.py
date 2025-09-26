@@ -17,4 +17,5 @@ urlpatterns = [
     path('friends',FriendView.as_view(),name='friends'),
     path('groups',GroupView.as_view(),name='groups'),
     path('groups/<int:id>',SpecificGroupView.as_view(),name='specific-group'),
+    path('get',GetUser.as_view(),name='get-user'),
 ]
