@@ -696,13 +696,14 @@ class SpecificGroupView(APIView):
 class GetUser(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
-        body = request.data
-        if not body['username'] or not isinstance(body['username'], str):
-            return Response({
-                'message':'Username is required as string'
-            })
+        username = request.query_params.get("username")
+        if not username:
+            return Response(
+                {"message": "username is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         try:
-            user = User.objects.get(username=body['username'])
+            user = User.objects.get(username=username)
             return Response({
                 'status': 'success',
                 'message': 'User',
