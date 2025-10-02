@@ -11,9 +11,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 import uuid
 from Divyd_be import settings
-from helpers import kora_functions
+from helpers import kora_functions, encryption_helper
+from user.models import UserBank
 from .models import *
 from .serializers import *
+from .tasks import *
 # Create your views here.
 def createWallet(user):
     Wallet.objects.create(user=user)
@@ -65,7 +67,57 @@ class FundWalletView(APIView):
                 "message":f"Something went wrong, {e} ",
             },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-#TODO: create the webhook for confirming transfer and updating user balance
+class WithdrawWalletView(APIView):
+    permission_classes = [IsAuthenticated]
+    def post(self,request):
+        body = request.data
+        user = request.user
+        try:
+            amount = float(body.get('amount'))
+            pin = body.get('pin')
+            bank_code = body.get('bank_code')
+            account = body.get('account')
+            if not amount or not pin or not bank_code or not account:
+                return Response({
+                    "message": "Amount, pin and bank details are required",
+                }, status=status.HTTP_400_BAD_REQUEST)
+            if encryption_helper.verify_hash(str(pin),user.pin):
+                wallet = Wallet.objects.get(user=user)
+                print(amount, wallet.balance)
+                if amount <= wallet.balance:
+                    valid_account = kora_functions.verify_bank_details(bank_code,account)
+                    if valid_account["status"]:
+                        response = kora_functions.transfer(amount,account,bank_code,(user.firstName +" "+ user.lastName), user.email,wallet.id)
+                        if response["status"]:
+                            return Response({
+                                "message": f"Transfer initiated successfully",
+                                "response":response
+                            },status=status.HTTP_200_OK)
+                        else:
+                            return Response({
+                                "message":"Transfer failed",
+                                "reason":response["message"]
+                            },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    else:
+                        return Response({
+                            "message":"Invalid bank details",
+                        },status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    return Response({
+                        "message":"Insufficient funds",
+                    },status=status.HTTP_400_BAD_REQUEST)
+            else:
+                return Response({
+                    "message":"Incorrect Pin",
+                },status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                "message":f"Something went wrong, {e} ",
+
+            },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
 @csrf_exempt
 def webhook(request):
     try:
@@ -73,9 +125,7 @@ def webhook(request):
         kora_sig = request.headers.get('x-korapay-signature')
         payload = request.body
         event_data = json.loads(payload)
-        print(event_data)
         payload_data = json.dumps(event_data['data'], separators=(',',':'))
-        print(payload_data)
 
         computed_sig = hmac.new(
             settings.KORA_SECRET.encode('utf-8'),
@@ -92,15 +142,50 @@ def webhook(request):
             wallet_id = reference.split('-')[1]
             og_reference = reference.split('-')[0]
             try:
-                with transaction.atomic():
-                    wallet = Wallet.objects.get(id=wallet_id)
-                    actual_amount = data.get('amount') - data.get('fee')
-                    wallet.balance += actual_amount
-                    wallet.save()
-                    Transaction.objects.create(wallet=wallet, amount=actual_amount, reference=og_reference, transaction_type=Transaction.CREDIT,category=Transaction.FUNDING)
+                wallet = Wallet.objects.get(id=wallet_id)
+                exists = Transaction.objects.filter(wallet=wallet, reference=og_reference).exists()
+                if exists:
                     return JsonResponse({
-                        "message":"Transaction saved successfully",
+                        "message": "Transaction already exists",
                     })
+                else:
+                    with transaction.atomic():
+                        wallet = Wallet.objects.get(id=wallet_id)
+                        actual_amount = data.get('amount') - data.get('fee')
+                        wallet.balance += actual_amount
+                        wallet.save()
+                        Transaction.objects.create(wallet=wallet, amount=actual_amount, reference=og_reference, transaction_type=Transaction.CREDIT,category=Transaction.FUNDING)
+                        return JsonResponse({
+                            "message":"Transaction saved successfully",
+                        })
+            except Exception as e:
+                print(str(e))
+                return JsonResponse({
+                    "message": f"Something went wrong, {e} ",
+                })
+        elif event_data.get('event') == 'transfer.success':
+            data = event_data.get("data", {})
+            reference = data.get('reference')
+            wallet_id = reference.split('-')[1]
+            og_reference = reference.split('-')[0]
+            try:
+                wallet = Wallet.objects.get(id=wallet_id)
+                exists = Transaction.objects.filter(wallet=wallet, reference=og_reference).exists()
+                if exists:
+                    return JsonResponse({
+                        "message": "Transaction already exists",
+                    })
+                else:
+                    with transaction.atomic():
+                        actual_amount = data.get('amount') + data.get('fee')
+                        wallet.balance -= actual_amount
+                        wallet.save()
+                        Transaction.objects.create(wallet=wallet, amount=actual_amount, reference=og_reference,
+                                                   transaction_type=Transaction.DEBIT, category=Transaction.WITHDRAWAL)
+                        send_transfer_success(wallet.user_id,data.get('amount'))
+                        return JsonResponse({
+                            "message": "Transaction saved successfully",
+                        })
             except Exception as e:
                 print(str(e))
                 return JsonResponse({

@@ -18,4 +18,5 @@ urlpatterns = [
     path('groups',GroupView.as_view(),name='groups'),
     path('groups/<int:id>',SpecificGroupView.as_view(),name='specific-group'),
     path('get',GetUser.as_view(),name='get-user'),
+
 ]
