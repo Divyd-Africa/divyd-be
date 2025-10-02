@@ -1,3 +1,5 @@
+import email
+
 from django.core.cache import cache
 from Divyd_be import settings
 import requests
@@ -61,7 +63,7 @@ def generate_temp_account(amount, user):
             "user_id":user.id,
             "wallet_id":user.wallet.id
         },
-        "notification_url":"https://2b1c0f3f3840.ngrok-free.app/api/v1/wallet/webhook"
+        "notification_url":"https://66a03eb9cc61.ngrok-free.app/api/v1/wallet/webhook"
     }
     response = requests.post(f"{BASE_URL}/charges/bank-transfer", json=payload, headers={
         'Content-Type': 'application/json',
@@ -70,8 +72,30 @@ def generate_temp_account(amount, user):
     return response.json()
 
 ##TODO
-def transfer(amount, account, bank_code):
-    pass
+def transfer(amount, account, bank_code, name, email, wallet_id):
+    payload = {
+        "reference":f"{uuid.uuid4().hex}-{wallet_id}",
+        "destination":{
+            "type":"bank_account",
+            "amount":amount,
+            "currency":"NGN",
+            "narration":f"Wallet withdrawal for {name}",
+            "bank_account":{
+                "bank":bank_code,
+                "account":account,
+            },
+            "customer":{
+                "name":name,
+                "email":email,
+            }
+        },
+    }
+    response = requests.post(f"{BASE_URL}/transactions/disburse", json=payload, headers={
+        'Content-Type': 'application/json',
+        'Authorization':f"Bearer {secret}"
+    })
+    print(response.json())
+    return response.json()
 
 def encrypt_payload():
     pass

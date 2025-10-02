@@ -192,9 +192,13 @@ class VerifyEmailView(APIView):
                 user.is_email_verified = True
                 user.save()
                 set_device_token(user, body['token'])
+                token = RefreshToken.for_user(user)
+                access_token = str(token.access_token)
+                update_last_login(user.email)
                 return Response({
                     'status': 'success',
-                    'message': 'Email verified successfully'
+                    'message': 'Email verified successfully',
+                    "access_token": access_token,
                 },status=status.HTTP_200_OK)
         except User.DoesNotExist:
             return Response({
