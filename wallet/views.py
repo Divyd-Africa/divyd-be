@@ -51,7 +51,7 @@ class FundWalletView(APIView):
                 "message": "Amount must be greater than 100",
             },status=status.HTTP_400_BAD_REQUEST)
         try:
-            Wallet.objects.get(user=user)
+            wallet = Wallet.objects.get(user=user)
             response = kora_functions.generate_temp_account(amount,user)
             return Response({
                 "message":"Virtual account generated successfully",
@@ -83,8 +83,13 @@ class WithdrawWalletView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
             if encryption_helper.verify_hash(str(pin),user.pin):
                 wallet = Wallet.objects.get(user=user)
-                print(amount, wallet.balance)
-                if amount <= wallet.balance:
+                exhausted = check_three(wallet,"withdraw")
+                if exhausted:
+                    deduct_amount = amount + 100
+                else:
+                    deduct_amount = amount
+                if deduct_amount <= wallet.balance:
+                    print(deduct_amount)
                     valid_account = kora_functions.verify_bank_details(bank_code,account)
                     if valid_account["status"]:
                         response = kora_functions.transfer(amount,account,bank_code,(user.firstName +" "+ user.lastName), user.email,wallet.id)
@@ -115,8 +120,72 @@ class WithdrawWalletView(APIView):
                 "message":f"Something went wrong, {e} ",
 
             },status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+class CalculateFee(APIView):
+    permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        params = request.query_params
 
+        amount = params.get('amount')
+        action = params.get('action')
+
+        # Validate required params
+        if not amount or not action:
+            return Response({
+                "message": "Both 'amount' and 'action' are required parameters."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate amount type
+        try:
+            amount = float(amount)
+        except ValueError:
+            return Response({
+                "message": "Amount must be a valid number."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate action choice
+        if action not in ['fund', 'withdraw']:
+            return Response({
+                "message": "Action must be either 'fund' or 'withdraw'."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        wallet = Wallet.objects.get(user=request.user)
+        exhausted = check_three(wallet, action)
+
+        if exhausted and action == 'fund':
+            fee = determine_fee(amount)
+            return Response({
+                "message": f"You have exceeded your free {action} limit for today. "
+                           f"A fee of ₦{fee} will be deducted from the {action} amount.",
+                "show": True
+            })
+        elif exhausted and action == 'withdraw':
+            fee = 100
+            return Response({
+                "message": f"You have exceeded your free {action} limit for today. "
+                           f"A fee of ₦{fee} will be deducted.",
+                "show": True
+            })
+        return Response({"show": False})
+def determine_fee(amount):
+    if amount < 5000:
+        return 100
+    elif amount >=5000:
+        return (0.02 * amount)
+
+def check_three(wallet,action):
+    today = timezone.now().date()
+    if action == "fund":
+        transaction_count = Transaction.objects.filter(wallet=wallet, category=Transaction.FUNDING,
+                                                       created_at__date=today).count()
+    elif action == "withdraw":
+        transaction_count = Transaction.objects.filter(wallet=wallet, category=Transaction.WITHDRAWAL,
+                                                       created_at__date=today).count()
+
+    if transaction_count >= 3:
+        return True
+    else:
+        return False
 
 @csrf_exempt
 def webhook(request):
@@ -151,7 +220,11 @@ def webhook(request):
                 else:
                     with transaction.atomic():
                         wallet = Wallet.objects.get(id=wallet_id)
-                        actual_amount = data.get('amount') - data.get('fee')
+                        bear_cost = check_three(wallet,"fund")
+                        if bear_cost:
+                            actual_amount = data.get('amount') - determine_fee(data.get('amount'))
+                        else:
+                            actual_amount = data.get('amount')
                         wallet.balance += actual_amount
                         wallet.save()
                         Transaction.objects.create(wallet=wallet, amount=actual_amount, reference=og_reference, transaction_type=Transaction.CREDIT,category=Transaction.FUNDING)
@@ -177,7 +250,11 @@ def webhook(request):
                     })
                 else:
                     with transaction.atomic():
-                        actual_amount = data.get('amount') + data.get('fee')
+                        exhausted = check_three(wallet,"withdraw")
+                        if exhausted:
+                            actual_amount = data.get('amount') + 100
+                        else:
+                            actual_amount = data.get('amount')
                         wallet.balance -= actual_amount
                         wallet.save()
                         Transaction.objects.create(wallet=wallet, amount=actual_amount, reference=og_reference,

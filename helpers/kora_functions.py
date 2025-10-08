@@ -58,12 +58,12 @@ def generate_temp_account(amount, user):
             "email":user.email
         },
         "account_name":f"{user.firstName} {user.lastName}'s Divyd",
-        "merchant_bears_cost":False,
+        "merchant_bears_cost":True,
         "metadata":{
             "user_id":user.id,
             "wallet_id":user.wallet.id
         },
-        "notification_url":"https://66a03eb9cc61.ngrok-free.app/api/v1/wallet/webhook"
+        "notification_url":"https://64797941dceb.ngrok-free.app/api/v1/wallet/webhook"
     }
     response = requests.post(f"{BASE_URL}/charges/bank-transfer", json=payload, headers={
         'Content-Type': 'application/json',
